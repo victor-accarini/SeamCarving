@@ -6,3 +6,6 @@ all: seam
 
 seam: seam.c seam.h
 	gcc $(CFLAGS) seam.c $(PKGFLAGS) -o seam $(LFLAGS) 
+
+test: test.c seam.h
+	gcc $(CFLAGS) test.c $(PKGFLAGS) -o seam $(LFLAGS) 
