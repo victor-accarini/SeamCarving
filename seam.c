@@ -76,7 +76,7 @@ main (int argc, char *argv[])
 	DestroyMagickWand(wand);
 
 	/* Here is were the magic works */
-	SeamRemove (image, new_width, new_height);
+	SeamResize (image, new_width, new_height);
 
 	/* Print result */
 	PixelWand *kkk = NewPixelWand();

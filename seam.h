@@ -34,11 +34,17 @@ SeamImage*
 getEnergyFromImage (SeamImage *image);
 
 /* Seam Functions */
+void
+SeamRemove (SeamImage *image, SeamPath *path, char axis);
+
 SeamPath*
 findImageVerticalSeamPath (SeamImage *image);
 
+SeamPath*
+findImageHorizontalSeamPath (SeamImage *image);
+
 void
-SeamRemove (SeamImage *image,
+SeamResize (SeamImage *image,
 	   		size_t image_width,
 		   	size_t image_height);
 
@@ -123,19 +129,43 @@ getPixelGradient (SeamPixels left, SeamPixels right, SeamPixels top, SeamPixels 
 }
 
 void
-SeamRemove (SeamImage *image, size_t image_width, size_t image_height)
+SeamResize (SeamImage *image, size_t image_width, size_t image_height)
 {
-	uint64_t  y, x;
-	uint64_t  max;
 	SeamImage *energy_img;
 	SeamPath *path;
 
 	while (image->width > image_width) {
 		energy_img = getEnergyFromImage (image);
 		path = findImageVerticalSeamPath (energy_img);
-		destroySeamImage (energy_img);
+		SeamRemove (image, path, 'x');
 
-		uint64_t pathpos = 0;
+		destroySeamImage (energy_img);
+		free (path);
+	}
+
+	while (image->height > image_height) {
+		energy_img = getEnergyFromImage (image);
+		path = findImageHorizontalSeamPath (energy_img);
+		SeamRemove (image, path, 'y');
+
+		/*
+		uint64_t y;
+		for (y = 0; y < image->width; y++) {
+			printf("%ld -> ", path[y].pos);
+		}*/
+
+		destroySeamImage (energy_img);
+		free (path);
+	}
+	return;
+}
+
+void
+SeamRemove (SeamImage *image, SeamPath *path, char axis)
+{
+	uint64_t  y, x;
+	uint64_t pathpos = 0;
+	if (axis == 'x') {
 		x = 0;
 		for (y = 0; y < image->height*image->width; y++) {
 			if (path[pathpos].pos != y) {
@@ -146,31 +176,26 @@ SeamRemove (SeamImage *image, size_t image_width, size_t image_height)
 			}
 		}
 		image->width -= 1;
-		free (path);
-	}
-	/*max = 0;
-	for (y = 0; y < image->height*image->width; y++) {
-		if (max < energy_img->data[y].green) {
-			max = energy_img->data[y].green;
+	} else {
+		uint8_t ffound = 0;
+		uint64_t line = image->width;
+		for (x = 0; x < line; x++) {
+			for (y = 0; y < (image->height-1)*line; y+=line) {
+				uint64_t pos = x+y;
+				if (path[pathpos].pos != pos && !ffound) {
+					continue;	
+				} else if (path[pathpos].pos == pos && !ffound) {
+					image->data[pos] = image->data[pos+line];
+					ffound = 1;
+				} else {
+					image->data[pos] = image->data[pos+line];
+				}
+			}
+			ffound = 0;
+			pathpos++;
 		}
+		image->height -= 1;
 	}
-	printf("%ld\n",max);
-	for (y = 0; y < image->height*image->width; y++) {
-		energy_img->data[y].green = (energy_img->data[y].green*90000)/max;
-	}*/
-
-	/*for (y = 0; y < image->height*image->width; y+=image->width) {
-		for (x = 0; x < image->width; x++) {
-			uint64_t pos = x+y;
-			//image->data[pos].red = energy_img->data[pos].red;
-			//image->data[pos].green = energy_img->data[pos].red;
-			//image->data[pos].blue = energy_img->data[pos].red;
-			image->data[pos].red = energy_img->data[pos].green;
-			image->data[pos].green = energy_img->data[pos].green;
-			image->data[pos].blue = energy_img->data[pos].green;
-		}
-	}*/
-	return;
 }
 
 SeamPath*
@@ -231,6 +256,80 @@ findImageVerticalSeamPath (SeamImage *image)
 				path[path_pos].pos = (data[posabove].green < data[posabove-1].green)? posabove : posabove-1;
 			} else {
 				path[path_pos].pos = (data[posabove].green < data[posabove+1].green)? posabove : posabove+1;
+			}
+		}
+		pos = path[path_pos].pos; //Update current position
+	}
+
+	return path;
+}
+
+SeamPath*
+findImageHorizontalSeamPath (SeamImage *image)
+{
+	/* RED: Image Energy */
+	/* GREEN: Minimum path matrix -> Dynamic Programing */
+	uint64_t   y, x;
+	uint64_t   pos, posleft;
+	uint64_t   line;
+	SeamPath   *path;
+	SeamPixels *data;
+	
+	data = image->data;
+	line = image->width;
+	path = (SeamPath*) malloc (sizeof(SeamPath)*(image->width));
+	if (path == NULL) {
+		printf ("Error: unable to allocate memory for minimum path");
+		return NULL;
+	}
+
+	/* Calculate all minimum paths */	
+	for (x = 0; x < line*image->height; x+= line) {
+		data[x].green = data[x].red;
+	}
+
+	for (x = 1; x < line; x++) {
+		for (y = 0; y < image->height*line; y+=line) {
+			pos = x + y;
+			posleft = pos - 1;
+			if (y == 0) {
+				data[pos].green = data[pos].red + fmin(data[posleft].green, data[posleft+line].green);
+			} else if (y == (image->height-1)*image->width) {
+				data[pos].green = data[pos].red + fmin(data[posleft-line].green, data[posleft].green);
+			} else {
+				data[pos].green = data[pos].red + fmin(data[posleft-line].green, fmin(data[posleft].green, data[posleft+line].green));
+			}
+		}
+	}
+/*
+	for (y = 0; y < line*image->height; y++) {
+		printf("%lf-", data[y].green);
+	}
+	printf("\n");
+*/
+	/* Find minimum path */
+	uint64_t minimum = image->width-1;
+	for (pos = minimum; pos < image->height*line; pos+=line) {
+		if (data[pos].green < data[minimum].green) {
+			minimum = pos;
+		}
+	}
+
+	int64_t path_pos = image->width-1; /* Must be signed integer! */
+	path[path_pos].pos = minimum;
+	pos = minimum;
+	line = image->width;
+	for (path_pos = image->width-2; path_pos >= 0; path_pos--) {
+		posleft = pos - 1;
+		if (pos < image->width) {
+			path[path_pos].pos = (data[posleft].green < data[posleft+line].green)? posleft : posleft+line;
+		} else if (pos >= (image->height-1)*image->width) {
+			path[path_pos].pos = (data[posleft-line].green < data[posleft].green)? posleft-line : posleft;
+		} else {
+			if (data[posleft-line].green < data[posleft+line].green) {
+				path[path_pos].pos = (data[posleft].green < data[posleft-line].green)? posleft : posleft-line;
+			} else {
+				path[path_pos].pos = (data[posleft].green < data[posleft+line].green)? posleft : posleft+line;
 			}
 		}
 		pos = path[path_pos].pos; //Update current position
